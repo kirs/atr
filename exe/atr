@@ -149,6 +149,11 @@ loop do
 
   action = Atr::UI.action_prompt
   if action == :repeat
+    unless last_action
+      puts "No last action defined"
+      next
+    end
+
     action = last_action
     puts "Repeating last action (#{last_action})..."
   end
@@ -171,7 +176,7 @@ loop do
     failed = runnables.select(&:failed)
     if failed.any?
       puts "Running #{failed.size} failed tests..."
-      runnables = run_all(filter: Regexp.union(*failed.map(&:name)))
+      runnables = run_all(filter: Regexp.union(*failed.map(&:name).map(&:to_s)))
     else
       puts "None tests failed"
     end
@@ -185,7 +190,7 @@ loop do
     patches = GitDiffParser.parse(`git diff`)
     patches = patches.map { |patch| Atr::PatchLocation.create(patch) }
 
-    targets = Isolation.run_in_isolation do
+    runnables = Atr::Isolation.run_in_isolation do
       require Atr.target_file
 
       options = { io: $stdout, color: true, output_inline: true }
