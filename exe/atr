@@ -1,5 +1,6 @@
 #! /usr/bin/env ruby
 require 'atr/ui'
+require 'method_source'
 
 $LOAD_PATH.unshift(File.expand_path('./test'))
 
@@ -50,13 +51,9 @@ module Atr
 
   module Helpers
     extend self
-    def intersect?(patches, test_location)
+    def patches_intersect?(patches, test_location)
       patches.any? { |patch| test_location.file.ends_with?(patch.file) && test_location.lines_range.overlaps?(patch.lines_range) }
     end
-  end
-
-  module Isolation
-    extend self
 
     def run_in_isolation(&blk)
       read, write = IO.pipe
@@ -85,7 +82,7 @@ Atr.init_cli
 # require_relative '../config/boot'
 
 def load_runnables
-  Atr::Isolation.run_in_isolation do
+  Atr::Helpers.run_in_isolation do
     require Atr.target_file
 
     suites = Minitest::Runnable.runnables.reject { |s| s.runnable_methods.empty? }#.shuffle
@@ -105,7 +102,7 @@ def load_runnables
 end
 
 def run_all(filter: nil)
-  Atr::Isolation.run_in_isolation do
+  Atr::Helpers.run_in_isolation do
     require Atr.target_file
 
     options = { io: $stdout, color: true, output_inline: true }
@@ -136,61 +133,68 @@ def run_all(filter: nil)
 end
 
 runnables = nil
+selected_runnables = nil
 last_action = nil
 
 if filter = Atr.startup_options[:filter]
   filter = Regexp.new $1 if filter =~ %r%/(.*)/%
   runnables = run_all(filter: filter)
 end
+first_run = true
 
 loop do
-  Atr::UI.print_usage
-  puts
+  Atr::UI.print_usage(first_run)
+  first_run = false
 
   action = Atr::UI.action_prompt
   if action == :repeat
     unless last_action
-      puts "No last action defined"
+      puts Atr::UI.yellow "No last action recorded"
       next
     end
 
     action = last_action
-    puts "Repeating last action (#{last_action})..."
+    puts Atr::UI.magenta("Repeating last action (#{last_action})...")
+    if action == :subset
+      puts Atr::UI.green "Running subset of #{selected_runnables.size} tests..."
+      runnables = run_all(filter: Regexp.union(*selected_runnables.map(&:name).map(&:to_s)))
+      next
+    end
   end
 
   case action
   when :subset
     unless runnables
-      puts "Loading the list of test cases..."
+      puts Atr::UI.green "Loading the list of test cases..."
       runnables = load_runnables
     end
 
     selected_runnables = Atr::UI.prompt(runnables)
-    puts "Running #{selected_runnables.size} tests..."
+    puts Atr::UI.green "Running #{selected_runnables.size} tests..."
     runnables = run_all(filter: Regexp.union(*selected_runnables.map(&:name).map(&:to_s)))
   when :failed
     unless runnables
-      puts "No tests failed yet\n"
+      puts Atr::UI.yellow "No tests failed yet"
       next
     end
     failed = runnables.select(&:failed)
     if failed.any?
-      puts "Running #{failed.size} failed tests..."
+      puts Atr::UI.green "Running #{failed.size} failed tests..."
       runnables = run_all(filter: Regexp.union(*failed.map(&:name).map(&:to_s)))
     else
-      puts "None tests failed"
+      puts Atr::UI.yellow "None tests failed"
     end
   when :all
-    puts "Running all tests..."
+    puts Atr::UI.green "Running all tests..."
     runnables = run_all
   when :changes
-    puts "Running changed tests..."
+    puts Atr::UI.green "Running changed tests..."
     require 'git_diff_parser'
 
     patches = GitDiffParser.parse(`git diff`)
     patches = patches.map { |patch| Atr::PatchLocation.create(patch) }
 
-    runnables = Atr::Isolation.run_in_isolation do
+    runnables = Atr::Helpers.run_in_isolation do
       require Atr.target_file
 
       options = { io: $stdout, color: true, output_inline: true }
@@ -208,7 +212,7 @@ loop do
           test_location = Atr::TestLocation.create(runnable)
           targets << test_location
 
-          if Atr::Helpers.intersect?(patches, test_location)
+          if Atr::Helpers.patches_intersect?(patches, test_location)
             result = Minitest.run_one_method(suite, test_method)
             reporter.record(result)
             test_location.failed = true if result.failure

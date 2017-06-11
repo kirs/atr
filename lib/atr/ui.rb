@@ -18,19 +18,32 @@ module Atr
   module UI
     extend self
 
-    def colorize(str)
-      ansi_codes = 36.to_s
-      color_flag = "\033[" + ansi_codes + "m"
+    def colorize(str, color)
+      color_flag = "\033[" + color.to_s + "m"
       "#{color_flag}#{str}\033[0m"
     end
 
-    def print_usage
-      puts " \u203A Press #{colorize('a')} to run all tests"
-      puts " \u203A Press #{colorize('s')} to run subset of tests"
-      puts " \u203A Press #{colorize('c')} to run changed tests"
-      puts " \u203A Press #{colorize('f')} to run failed tests"
-      puts " \u203A Press #{colorize('q')} to quit"
-      puts " \u203A Press #{colorize('Enter')} to run the last command"
+    def magenta(str)
+      colorize(str, 36)
+    end
+
+    def green(str)
+      colorize(str, 32)
+    end
+
+    def yellow(str)
+      colorize(str, 33)
+    end
+
+    def print_usage(first_run)
+      puts unless first_run
+      puts " \u203A Press #{magenta('a')} to run all tests"
+      puts " \u203A Press #{magenta('s')} to run subset of tests"
+      puts " \u203A Press #{magenta('c')} to run changed tests"
+      puts " \u203A Press #{magenta('f')} to run failed tests"
+      puts " \u203A Press #{magenta('q')} to quit"
+      puts " \u203A Press #{magenta('Enter')} to run the last command"
+      puts
     end
 
     CONTROL_KEYS = {
