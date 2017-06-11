@@ -1,0 +1,220 @@
+#! /usr/bin/env ruby
+require 'atr/ui'
+
+$LOAD_PATH.unshift(File.expand_path('./test'))
+
+require 'optparse'
+module Atr
+  class << self
+    attr_accessor :startup_options, :target_file
+
+    def init_cli
+      options = {}
+      OptionParser.new do |opts|
+        opts.banner = "Usage: example.rb [options]"
+
+        opts.on "-n", "--name PATTERN", "Filter run on /regexp/ or string." do |a|
+          options[:filter] = a
+        end
+      end.parse!
+
+      self.startup_options = options
+      self.target_file = File.expand_path(ARGV[0])
+    end
+  end
+
+  class TestLocation < Struct.new(:file, :name, :lines_range)
+    attr_accessor :failed
+
+    def self.create(method)
+      lines = method.source.count("\n")
+      start_line = method.source_location[1]
+      new(method.source_location[0], method.name, Range.new(start_line, start_line + lines - 1))
+    end
+
+    def label
+      name.to_s
+    end
+
+    def test_method
+      name
+    end
+  end
+
+  class PatchLocation < Struct.new(:file, :lines_range)
+    def self.create(patch)
+      range = Range.new(patch.changed_line_numbers.first, patch.changed_line_numbers.last)
+      new(patch.file, range)
+    end
+  end
+
+  module Helpers
+    extend self
+    def intersect?(patches, test_location)
+      patches.any? { |patch| test_location.file.ends_with?(patch.file) && test_location.lines_range.overlaps?(patch.lines_range) }
+    end
+  end
+end
+Atr.init_cli
+
+# We could boot, but that only works for simple RoR applications
+# require_relative '../config/boot'
+
+module Isolation
+  extend self
+
+  def run_in_isolation(&blk)
+    read, write = IO.pipe
+    read.binmode
+    write.binmode
+
+    pid = fork do
+      read.close
+      computation = yield
+      result = Marshal.dump(computation)
+
+      write.puts [result].pack("m")
+      exit!
+    end
+
+    write.close
+    result = read.read
+    Process.wait2(pid)
+    return Marshal.load(result.unpack("m")[0])
+  end
+end
+
+def load_runnables
+  Isolation.run_in_isolation do
+    require Atr.target_file
+
+    suites = Minitest::Runnable.runnables.reject { |s| s.runnable_methods.empty? }#.shuffle
+    if suites.size > 1
+      raise "Something went wrong. Currently we don't support more than one test suite per file."
+    end
+
+    targets = []
+    suites.each do |suite|
+      suite.runnable_methods.each do |test_method|
+        runnable = suite.new(test_method).method(test_method)
+        targets << Atr::TestLocation.create(runnable)
+      end
+    end
+    targets
+  end
+end
+
+def run_all(filter: nil)
+  Isolation.run_in_isolation do
+    require Atr.target_file
+
+    options = { io: $stdout, color: true, output_inline: true }
+    reporter = Minitest::CompositeReporter.new
+    reporter << Minitest::SummaryReporter.new(options[:io], options)
+    reporter << Minitest::ProgressReporter.new(options[:io], options)
+    reporter.start
+
+    suites = Minitest::Runnable.runnables.reject { |s| s.runnable_methods.empty? }.shuffle
+    targets = []
+    suites.each do |suite|
+      suite.runnable_methods.each do |test_method|
+        # collect runnables, if updated
+        runnable = suite.new(test_method).method(test_method)
+        test_location = Atr::TestLocation.create(runnable)
+        targets << test_location
+
+        if !filter || filter === test_method
+          result = Minitest.run_one_method(suite, test_method)
+          reporter.record(result)
+          test_location.failed = true if result.failure
+        end
+      end
+    end
+    reporter.report
+    targets
+  end
+end
+
+runnables = nil
+last_action = nil
+
+if filter = Atr.startup_options[:filter]
+  filter = Regexp.new $1 if filter =~ %r%/(.*)/%
+  runnables = run_all(filter: filter)
+end
+
+loop do
+  Atr::UI.print_usage
+  puts
+
+  action = Atr::UI.action_prompt
+  if action == :repeat
+    action = last_action
+    puts "Repeating last action (#{last_action})..."
+  end
+
+  case action
+  when :subset
+    unless runnables
+      puts "Loading the list of test cases..."
+      runnables = load_runnables
+    end
+
+    selected_runnables = Atr::UI.prompt(runnables)
+    puts "Running #{selected_runnables.size} tests..."
+    runnables = run_all(filter: Regexp.union(*selected_runnables.map(&:name).map(&:to_s)))
+  when :failed
+    unless runnables
+      puts "No tests failed yet\n"
+      next
+    end
+    failed = runnables.select(&:failed)
+    if failed.any?
+      puts "Running #{failed.size} failed tests..."
+      runnables = run_all(filter: Regexp.union(*failed.map(&:name)))
+    else
+      puts "None tests failed"
+    end
+  when :all
+    puts "Running all tests..."
+    runnables = run_all
+  when :changes
+    puts "Running changed tests..."
+    require 'git_diff_parser'
+
+    patches = GitDiffParser.parse(`git diff`)
+    patches = patches.map { |patch| Atr::PatchLocation.create(patch) }
+
+    targets = Isolation.run_in_isolation do
+      require Atr.target_file
+
+      options = { io: $stdout, color: true, output_inline: true }
+      reporter = Minitest::CompositeReporter.new
+      reporter << Minitest::SummaryReporter.new(options[:io], options)
+      reporter << Minitest::ProgressReporter.new(options[:io], options)
+      reporter.start
+
+      suites = Minitest::Runnable.runnables.reject { |s| s.runnable_methods.empty? }.shuffle
+      targets = []
+      suites.each do |suite|
+        suite.runnable_methods.each do |test_method|
+          # collect runnables, if updated
+          runnable = suite.new(test_method).method(test_method)
+          test_location = Atr::TestLocation.create(runnable)
+          targets << test_location
+
+          if Atr::Helpers.intersect?(patches, test_location)
+            result = Minitest.run_one_method(suite, test_method)
+            reporter.record(result)
+            test_location.failed = true if result.failure
+          end
+        end
+      end
+      reporter.report
+      targets
+    end
+  else
+    raise ArgumentError, "Unknown action: #{action}"
+  end
+  last_action = action
+end
