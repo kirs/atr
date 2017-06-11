@@ -54,38 +54,38 @@ module Atr
       patches.any? { |patch| test_location.file.ends_with?(patch.file) && test_location.lines_range.overlaps?(patch.lines_range) }
     end
   end
+
+  module Isolation
+    extend self
+
+    def run_in_isolation(&blk)
+      read, write = IO.pipe
+      read.binmode
+      write.binmode
+
+      pid = fork do
+        read.close
+        computation = yield
+        result = Marshal.dump(computation)
+
+        write.puts [result].pack("m")
+        exit!
+      end
+
+      write.close
+      result = read.read
+      Process.wait2(pid)
+      return Marshal.load(result.unpack("m")[0])
+    end
+  end
 end
 Atr.init_cli
 
 # We could boot, but that only works for simple RoR applications
 # require_relative '../config/boot'
 
-module Isolation
-  extend self
-
-  def run_in_isolation(&blk)
-    read, write = IO.pipe
-    read.binmode
-    write.binmode
-
-    pid = fork do
-      read.close
-      computation = yield
-      result = Marshal.dump(computation)
-
-      write.puts [result].pack("m")
-      exit!
-    end
-
-    write.close
-    result = read.read
-    Process.wait2(pid)
-    return Marshal.load(result.unpack("m")[0])
-  end
-end
-
 def load_runnables
-  Isolation.run_in_isolation do
+  Atr::Isolation.run_in_isolation do
     require Atr.target_file
 
     suites = Minitest::Runnable.runnables.reject { |s| s.runnable_methods.empty? }#.shuffle
@@ -105,7 +105,7 @@ def load_runnables
 end
 
 def run_all(filter: nil)
-  Isolation.run_in_isolation do
+  Atr::Isolation.run_in_isolation do
     require Atr.target_file
 
     options = { io: $stdout, color: true, output_inline: true }
