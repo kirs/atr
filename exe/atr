@@ -24,17 +24,17 @@ module Atr
     end
   end
 
-  class TestLocation < Struct.new(:file, :name, :lines_range)
+  class TestLocation < Struct.new(:file, :suite, :name, :lines_range)
     attr_accessor :failed
 
-    def self.create(method)
+    def self.create(suite, method)
       lines = method.source.count("\n")
       start_line = method.source_location[1]
-      new(method.source_location[0], method.name, Range.new(start_line, start_line + lines - 1))
+      new(method.source_location[0], suite.to_s, method.name, Range.new(start_line, start_line + lines - 1))
     end
 
     def label
-      name.to_s
+      "#{suite}##{name}"
     end
 
     def test_method
@@ -86,15 +86,15 @@ def load_runnables
     require Atr.target_file
 
     suites = Minitest::Runnable.runnables.reject { |s| s.runnable_methods.empty? }#.shuffle
-    if suites.size > 1
-      raise "Something went wrong. Currently we don't support more than one test suite per file."
-    end
+    # if suites.size > 1
+    #   raise "Something went wrong. Currently we don't support more than one test suite per file."
+    # end
 
     targets = []
     suites.each do |suite|
       suite.runnable_methods.each do |test_method|
         runnable = suite.new(test_method).method(test_method)
-        targets << Atr::TestLocation.create(runnable)
+        targets << Atr::TestLocation.create(suite, runnable)
       end
     end
     targets
@@ -117,7 +117,7 @@ def run_all(filter: nil)
       suite.runnable_methods.each do |test_method|
         # collect runnables, if updated
         runnable = suite.new(test_method).method(test_method)
-        test_location = Atr::TestLocation.create(runnable)
+        test_location = Atr::TestLocation.create(suite, runnable)
         targets << test_location
 
         if !filter || filter === test_method
@@ -209,7 +209,7 @@ loop do
         suite.runnable_methods.each do |test_method|
           # collect runnables, if updated
           runnable = suite.new(test_method).method(test_method)
-          test_location = Atr::TestLocation.create(runnable)
+          test_location = Atr::TestLocation.create(suite, runnable)
           targets << test_location
 
           if Atr::Helpers.patches_intersect?(patches, test_location)

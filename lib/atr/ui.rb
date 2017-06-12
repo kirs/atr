@@ -170,7 +170,7 @@ module Atr
         Curses.refresh
 
         pattern = Regexp.new(query)
-        candidates = runnables.select { |n| n.label =~ pattern }
+        candidates = runnables.select { |n| n.name.to_s =~ pattern }
 
         print_candidates(candidates, total: runnables.size)
       end
@@ -182,10 +182,15 @@ module Atr
         Curses.clrtoeol
       end
 
+      unique_label = candidates.all? { |c| c.suite == candidates.first.suite }
       candidates.each_with_index do |cand, index|
         Curses.setpos(Curses.lines - 2 - candidates.size + index, 0)
         Curses.clrtoeol
-        Curses.addstr(cand.label)
+        if unique_label
+          Curses.addstr(cand.name.to_s)
+        else
+          Curses.addstr("#{Atr::UI.yellow(cand.suite)}##{cand.name}")
+        end
       end
 
       Curses.setpos(Curses.lines - 2, 0)
