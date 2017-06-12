@@ -163,7 +163,7 @@ module Atr
           end
         when 27 # ignore arrows
           next
-        when 10
+        when 10 # enter
           Curses.close_screen
           return candidates
         else
