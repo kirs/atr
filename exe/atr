@@ -140,11 +140,10 @@ if filter = Atr.startup_options[:filter]
   filter = Regexp.new $1 if filter =~ %r%/(.*)/%
   runnables = run_all(filter: filter)
 end
-first_run = true
 
+Atr::UI.print_welcome
 loop do
-  Atr::UI.print_usage(first_run)
-  first_run = false
+  Atr::UI.print_usage
 
   action = Atr::UI.action_prompt
   if action == :repeat

@@ -35,8 +35,8 @@ module Atr
       colorize(str, 33)
     end
 
-    def print_usage(first_run)
-      puts unless first_run
+    def print_usage
+      puts
       puts " \u203A Press #{magenta('a')} to run all tests"
       puts " \u203A Press #{magenta('s')} to run subset of tests"
       puts " \u203A Press #{magenta('c')} to run changed tests"
@@ -44,6 +44,10 @@ module Atr
       puts " \u203A Press #{magenta('q')} to quit"
       puts " \u203A Press #{magenta('Enter')} to run the last command"
       puts
+    end
+
+    def print_welcome
+      puts "Welcome to #{green('atr')}, interactive test runner"
     end
 
     CONTROL_KEYS = {
