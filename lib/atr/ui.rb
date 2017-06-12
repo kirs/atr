@@ -174,6 +174,8 @@ module Atr
 
         print_candidates(candidates, total: runnables.size)
       end
+    ensure
+      Curses.close_screen
     end
 
     def print_candidates(candidates, total:)
