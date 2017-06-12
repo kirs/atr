@@ -195,7 +195,7 @@ module Atr
         if unique_label
           Curses.addstr(cand.name.to_s)
         else
-          Curses.addstr("#{Atr::UI.yellow(cand.suite)}##{cand.name}")
+          Curses.addstr("#{cand.suite}##{cand.name}")
         end
       end
 
